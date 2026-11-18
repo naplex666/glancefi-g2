@@ -64,8 +64,64 @@ const ALERTS = [
 let alertIdx = 0
 const fired = new Set<string>()
 
-type Screen = 'home' | 'trade' | 'position' | 'alerts'
-const SCREENS: Screen[] = ['home', 'trade', 'position', 'alerts']
+// ---------- Telegram alert digest (Best Telegram angle) ----------
+// Token + chat id are the user's own config, stored only in this device's
+// localStorage (set from the phone companion below). Never shipped in the
+// repo, never hard-coded. Tap on the Telegram screen sends one digest.
+const TG_API = 'https://api.telegram.org'
+let tgStatus = ''
+function tgConfig(): { token: string; chat: string } | null {
+  try {
+    const token = (localStorage.getItem('glancefi.tg.token') || '').trim()
+    const chat = (localStorage.getItem('glancefi.tg.chat') || '').trim()
+    return token && chat ? { token, chat } : null
+  } catch {
+    return null
+  }
+}
+function digestText(): string {
+  const lines = [`GlanceFi digest — ${new Date().toLocaleTimeString()}`]
+  for (const coin of COINS) {
+    const p = prices[coin]
+    lines.push(`${coin} ${fmt(p.mid)}${fmtChg(p.chg24) ? `  ${fmtChg(p.chg24)} 24h` : ''}`)
+  }
+  if (position) {
+    const p = prices[position.coin]
+    const pnl = Number.isFinite(p.mid)
+      ? ((p.mid - position.entry) / position.entry) * position.size
+      : NaN
+    lines.push(`Pos: ${position.coin} LONG $${position.size}  PnL ${Number.isFinite(pnl) ? (pnl >= 0 ? '+' : '') + pnl.toFixed(2) : '...'}`)
+  } else {
+    lines.push('Pos: none')
+  }
+  lines.push(fired.size > 0 ? `Alerts hit: ${[...fired].join(', ')}` : 'Alerts: none hit')
+  lines.push('Paper only — no real orders.')
+  return lines.join('\n')
+}
+async function sendTelegramDigest(): Promise<void> {
+  const cfg = tgConfig()
+  if (!cfg) {
+    tgStatus = 'Belum diset: isi token + chat di HP dulu.'
+    await render()
+    return
+  }
+  tgStatus = 'Mengirim...'
+  await render()
+  try {
+    const res = await fetch(`${TG_API}/bot${cfg.token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: cfg.chat, text: digestText() }),
+    })
+    tgStatus = res.ok ? 'Terkirim ke Telegram.' : `Gagal (${res.status}) — cek token/chat.`
+  } catch {
+    tgStatus = 'Gagal kirim — cek koneksi.'
+  }
+  await render()
+}
+
+type Screen = 'home' | 'trade' | 'position' | 'alerts' | 'telegram'
+const SCREENS: Screen[] = ['home', 'trade', 'position', 'alerts', 'telegram']
 let screen: Screen = 'home'
 let selected = 0
 
@@ -222,6 +278,29 @@ function alertsText(): string {
   return lines.join('\n')
 }
 
+function telegramText(): string {
+  // Compact: the glasses body fits ~8 lines. The full digestText() is what
+  // gets sent to Telegram; here we show the same numbers, squeezed.
+  const lines = [`TELEGRAM — digest ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`]
+  for (const coin of COINS) {
+    const p = prices[coin]
+    lines.push(`${coin} ${fmt(p.mid)}${fmtChg(p.chg24) ? `  ${fmtChg(p.chg24)} 24h` : ''}`)
+  }
+  if (position) {
+    const p = prices[position.coin]
+    const pnl = Number.isFinite(p.mid)
+      ? ((p.mid - position.entry) / position.entry) * position.size
+      : NaN
+    lines.push(`Pos: ${position.coin} LONG $${position.size}  PnL ${Number.isFinite(pnl) ? (pnl >= 0 ? '+' : '') + pnl.toFixed(2) : '...'}`)
+  } else {
+    lines.push('Pos: none')
+  }
+  lines.push(fired.size > 0 ? `Alerts hit: ${[...fired].join(', ')}` : 'Alerts: none hit')
+  lines.push(tgConfig() ? '> TAP: kirim digest ke Telegram' : '> TAP: cek status (set di HP dulu)')
+  if (tgStatus) lines.push(tgStatus)
+  return lines.join('\n')
+}
+
 function screenText(): string {
   switch (screen) {
     case 'home':
@@ -232,6 +311,8 @@ function screenText(): string {
       return positionText()
     case 'alerts':
       return alertsText()
+    case 'telegram':
+      return telegramText()
   }
 }
 
@@ -241,6 +322,7 @@ function pagerLabel(): string {
     trade: 'Trade',
     position: 'Position',
     alerts: 'Alerts',
+    telegram: 'Telegram',
   }
   return `${names[screen]}  ·  tap: act  ·  swipe: screens  ·  dbl-tap: exit`
 }
@@ -297,6 +379,29 @@ async function render() {
   })
   await rendering
   mirrorCompanion()
+
+// Telegram config (companion only, stored in localStorage on this device)
+try {
+  const tokenInput = document.getElementById('tgToken') as HTMLInputElement | null
+  const chatInput = document.getElementById('tgChat') as HTMLInputElement | null
+  const saveBtn = document.getElementById('tgSave')
+  const statusEl = document.getElementById('tgStatus')
+  if (tokenInput) tokenInput.value = localStorage.getItem('glancefi.tg.token') || ''
+  if (chatInput) chatInput.value = localStorage.getItem('glancefi.tg.chat') || ''
+  if (statusEl && tgConfig()) statusEl.textContent = 'Tersimpan — siap kirim digest.'
+  saveBtn?.addEventListener('click', () => {
+    try {
+      localStorage.setItem('glancefi.tg.token', tokenInput?.value.trim() || '')
+      localStorage.setItem('glancefi.tg.chat', chatInput?.value.trim() || '')
+      if (statusEl) statusEl.textContent = tgConfig() ? 'Tersimpan — siap kirim digest.' : 'Isi token + chat id dulu.'
+    } catch {
+      if (statusEl) statusEl.textContent = 'Gagal simpan.'
+    }
+    render().catch(err => console.error(err))
+  })
+} catch {
+  // companion config unavailable — glasses screens still work
+}
 }
 
 function doTap() {
@@ -324,6 +429,9 @@ function doTap() {
     screen = 'trade'
   } else if (screen === 'alerts') {
     alertIdx = (alertIdx + 1) % ALERTS.length
+  } else if (screen === 'telegram') {
+    sendTelegramDigest().catch(err => console.error(err))
+    return
   }
   render().catch(err => console.error(err))
 }
@@ -386,6 +494,16 @@ app.innerHTML = `
       <span id="pageCount" style="font-size:12px;color:#919191;"></span>
     </header>
     <pre id="mirror" style="background:#2E2E2E;border:1px solid #3E3E3E;border-radius:12px;padding:20px;font-size:15px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:#E5E5E5;margin:0;"></pre>
+    <section style="margin-top:16px;background:#2E2E2E;border:1px solid #3E3E3E;border-radius:12px;padding:16px;">
+      <h2 style="font-size:14px;margin:0 0 8px;">Telegram digest (opsional)</h2>
+      <p style="font-size:12px;color:#919191;margin:0 0 12px;">Token bot + chat id disimpan di HP ini saja, tidak ikut ke repo. Tap di layar Telegram kacamata untuk kirim digest.</p>
+      <label style="display:block;font-size:12px;margin-bottom:4px;">Bot token</label>
+      <input id="tgToken" type="password" placeholder="123456:ABC..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid #3E3E3E;background:#1E1E1E;color:#E5E5E5;margin-bottom:10px;">
+      <label style="display:block;font-size:12px;margin-bottom:4px;">Chat id</label>
+      <input id="tgChat" type="text" placeholder="@Zec3on atau -100..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid #3E3E3E;background:#1E1E1E;color:#E5E5E5;margin-bottom:10px;">
+      <button id="tgSave" style="padding:8px 16px;border-radius:8px;border:0;background:#2E7D32;color:#fff;cursor:pointer;">Simpan</button>
+      <span id="tgStatus" style="font-size:12px;color:#919191;margin-left:10px;"></span>
+    </section>
     <footer style="font-size:12px;color:#7B7B7B;text-align:center;margin-top:16px;">
       Paper trading only — no real orders, no wallet, no funds. Tap glasses: act · swipe: screens · double-tap: exit
     </footer>
