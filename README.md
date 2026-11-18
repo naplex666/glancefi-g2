@@ -24,7 +24,7 @@ Crypto & DeFi (Hyperliquid).
 4. Tap the simulator canvas to cycle coins and paper-trade; double-tap exits (system dialog).
 
 ## What existed before 23 Nov 2026
-Concept, track research, skills install, and this spec only. All app code was written during build week 23–29 Nov 2026.
+Concept, track research, skills install, spec, and this v0.1.0 prototype (built 18 Nov 2026 as prep, tested in the simulator). Build-week work 23–29 Nov: polish, Telegram alert digest, demo video, and final testing — all changes during build week are committed separately.
 
 ## Feature requests for the APIs used (up to 5)
 1. Hyperliquid: a lightweight 24h change field in `allMids` so glasses apps avoid a second `candleSnapshot` call.
